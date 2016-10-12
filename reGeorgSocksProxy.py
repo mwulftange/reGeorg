@@ -4,15 +4,17 @@
 import logging
 import argparse
 import urllib3
+import re
 from threading import Thread
 from urlparse import urlparse
 from socket import *
 from threading import Thread
-from time import sleep
+from time import sleep,time
 
 # Constants
 SOCKTIMEOUT = 5
 RESENDTIMEOUT = 300
+DNS_CACHE_TTL = 300
 VER = "\x05"
 METHOD = "\x00"
 SUCCESS = "\x00"
@@ -98,6 +100,7 @@ class ColoredLogger(logging.Logger):
 logging.setLoggerClass(ColoredLogger)
 log = logging.getLogger(__name__)
 transferLog = logging.getLogger("transfer")
+dns_cache = {}
 
 
 class SocksCmdNotImplemented(Exception):
@@ -138,13 +141,18 @@ class session(Thread):
 
     def parseSocks5(self, sock):
         log.debug("SocksVersion5 detected")
-        nmethods, methods = (sock.recv(1), sock.recv(1))
-        sock.sendall(VER + METHOD)
-        ver = sock.recv(1)
-        if ver == "\x02":  # this is a hack for proxychains
-            ver, cmd, rsv, atyp = (sock.recv(1), sock.recv(1), sock.recv(1), sock.recv(1))
+        nmethods = sock.recv(1)
+        accepted = False
+        for i in xrange(0, ord(nmethods)):
+            if sock.recv(1) == METHOD:
+                accepted = True
+        if accepted:
+            sock.sendall(VER + METHOD)
         else:
-            cmd, rsv, atyp = (sock.recv(1), sock.recv(1), sock.recv(1))
+            sock.sendall(VER + "\xFF")
+            return
+        ver = sock.recv(1)
+        cmd, rsv, atyp = (sock.recv(1), sock.recv(1), sock.recv(1))
         target = None
         targetPort = None
         if atyp == "\x01":  # IPv4
@@ -170,12 +178,13 @@ class session(Thread):
         elif cmd == "\x03":  # UDP
             raise SocksCmdNotImplemented("Socks5 - UDP not implemented")
         elif cmd == "\x01":  # CONNECT
-            serverIp = target
-            try:
-                serverIp = gethostbyname(target)
-            except:
-                log.error("oeps")
-            serverIp = "".join([chr(int(i)) for i in serverIp.split(".")])
+            if atyp == "\x03":
+                try:
+                    target = self.gethostbyname(target)
+                except:
+                    sock.sendall(chr(0) + chr(91) + "\x00"*4 + chr(targetPort / 256) + chr(targetPort % 256))
+                    raise RemoteConnectionFailed("[%s:%d] Remote DNS resolving failed" % (target, targetPort))
+            serverIp = "".join([chr(int(i)) for i in target.split(".")])
             self.cookie = self.setupRemoteSession(target, targetPort)
             if self.cookie:
                 sock.sendall(VER + SUCCESS + "\x00" + "\x01" + serverIp + chr(targetPort / 256) + chr(targetPort % 256))
@@ -192,15 +201,25 @@ class session(Thread):
         if cmd == "\x01":  # Connect
             targetPort = sock.recv(2)
             targetPort = ord(targetPort[0]) * 256 + ord(targetPort[1])
-            target = sock.recv(4)
-            sock.recv(1)
-            target = ".".join([str(ord(i)) for i in target])
-            serverIp = target
-            try:
-                serverIp = gethostbyname(target)
-            except:
-                log.error("oeps")
-            serverIp = "".join([chr(int(i)) for i in serverIp.split(".")])
+            serverIp = sock.recv(4)
+            # skip USERID field
+            while sock.recv(1) != "\x00":
+                continue
+            target = ".".join([str(ord(i)) for i in serverIp])
+            # handle SOCKS4A
+            if target.startswith("0.0.0.") and not target.endswith(".0"):
+                hostname = ""
+                b = None
+                while b != "\x00":
+                    b = sock.recv(1)
+                    hostname += b
+                hostname = hostname.strip("\x00")
+                try:
+                    target = self.gethostbyname(hostname)
+                except:
+                    sock.sendall(chr(0) + chr(91) + serverIp + chr(targetPort / 256) + chr(targetPort % 256))
+                    raise RemoteConnectionFailed("[%s:%d] Remote DNS resolving failed" % (target, targetPort))
+            serverIp = "".join([chr(int(i)) for i in target.split(".")])
             self.cookie = self.setupRemoteSession(target, targetPort)
             if self.cookie:
                 sock.sendall(chr(0) + chr(90) + serverIp + chr(targetPort / 256) + chr(targetPort % 256))
@@ -218,6 +237,23 @@ class session(Thread):
             return self.parseSocks5(sock)
         elif ver == "\x04":
             return self.parseSocks4(sock)
+
+    def gethostbyname(self, host):
+        if host in dns_cache:
+            entry = dns_cache[host]
+            ttl = DNS_CACHE_TTL - (time() - entry['time'])
+            if ttl > 0:
+                log.info("Remote DNS Query Result: [%s] <---> [%s] (cached, TTL=%d)" % (host, entry['address'], ttl))
+                return entry['address']
+        headers = {"X-CMD": "DNS", "X-TARGET": host}
+        response = self.conn.urlopen('POST', self.httpPath, headers=headers, body="")
+        if response.status == 200 and re.match(r'^\d+(?:\.\d+){3}', response.data):
+            dns_cache[host] = entry = { 'address': response.data, 'time': time() }
+            log.info("Remote DNS Query Result: [%s] <---> [%s]" % (host, entry['address']))
+        else:
+            raise Exception("Remote DNS Query Error: [%s]" % (host, ))
+        response.close()
+        return entry['address']
 
     def setupRemoteSession(self, target, port):
         headers = {"X-CMD": "CONNECT", "X-TARGET": target, "X-PORT": port}
@@ -274,6 +310,8 @@ class session(Thread):
                         log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (self.target, self.port, response.status, status, response.getheader("X-ERROR")))
                 else:
                     log.error("[%s:%d] HTTP [%d]: Shutting down" % (self.target, self.port, response.status))
+                    log.debug("[%s:%d] Message: %s" % (self.target, self.port, response.getheader("X-ERROR")))
+                response.close()
                 if data is None:
                     # Remote socket closed
                     break
@@ -311,6 +349,7 @@ class session(Thread):
                         break
                 else:
                     log.error("[%s:%d] HTTP [%d]: Shutting down" % (self.target, self.port, response.status))
+                    log.debug("[%s:%d] Message: %s" % (self.target, self.port, response.getheader("X-ERROR")))
                     break
                 transferLog.info("[%s:%d] >>>> [%d]" % (self.target, self.port, len(data)))
             except timeout:
