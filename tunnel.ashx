@@ -99,6 +99,19 @@ public class GenericHandler1 : IHttpHandler, System.Web.SessionState.IRequiresSe
                         context.Response.AddHeader("X-STATUS", "FAIL");
                     }
                 }
+                else if (cmd == "DNS")
+                {
+                    String target = context.Request.Headers.Get("X-TARGET");
+                    IPAddress[] addresses = Dns.GetHostByName(target).AddressList;
+                    if (addresses.Length > 0) {
+                        context.Response.AddHeader("X-STATUS", "OK");
+                        context.Response.Write(addresses[0]);
+                    } else
+                    {
+                        context.Response.AddHeader("X-ERROR", "DNS lookup failed");
+                        context.Response.AddHeader("X-STATUS", "FAIL");
+                    }
+                }
             } else {
                 context.Response.Write("Georg says, 'All seems fine'");
             }
