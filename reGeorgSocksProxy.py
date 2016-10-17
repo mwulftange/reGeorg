@@ -132,7 +132,7 @@ class session(Thread):
         self.httpScheme = o.scheme
         self.httpHost = o.netloc.split(":")[0]
         self.httpPath = o.path
-        self.cookie = None
+        self.cookies = {}
         self.headers = custom_headers
         if o.scheme == "http":
             self.httpScheme = urllib3.HTTPConnectionPool
@@ -146,6 +146,13 @@ class session(Thread):
         headers_new = self.headers.copy()
         headers_new.update(headers)
         return headers_new
+
+    def updateCookies(self, cookies):
+        new_cookies = dict([c.split(";", 1)[0].split("=", 1) for c in cookies])
+        self.cookies.update(new_cookies)
+
+    def getcookies(self):
+        return "; ".join(["%s=%s" % (k,v) for (k,v) in self.cookies.iteritems()])
 
     def parseSocks5(self, sock):
         log.debug("SocksVersion5 detected")
@@ -193,8 +200,8 @@ class session(Thread):
                     sock.sendall(chr(0) + chr(91) + "\x00"*4 + chr(targetPort / 256) + chr(targetPort % 256))
                     raise RemoteConnectionFailed("[%s:%d] Remote DNS resolving failed" % (target, targetPort))
             serverIp = "".join([chr(int(i)) for i in target.split(".")])
-            self.cookie = self.setupRemoteSession(target, targetPort)
-            if self.cookie:
+            status = self.setupRemoteSession(target, targetPort)
+            if status:
                 sock.sendall(VER + SUCCESS + "\x00" + "\x01" + serverIp + chr(targetPort / 256) + chr(targetPort % 256))
                 return True
             else:
@@ -228,8 +235,8 @@ class session(Thread):
                     sock.sendall(chr(0) + chr(91) + serverIp + chr(targetPort / 256) + chr(targetPort % 256))
                     raise RemoteConnectionFailed("[%s:%d] Remote DNS resolving failed" % (target, targetPort))
             serverIp = "".join([chr(int(i)) for i in target.split(".")])
-            self.cookie = self.setupRemoteSession(target, targetPort)
-            if self.cookie:
+            status = self.setupRemoteSession(target, targetPort)
+            if status:
                 sock.sendall(chr(0) + chr(90) + serverIp + chr(targetPort / 256) + chr(targetPort % 256))
                 return True
             else:
@@ -269,24 +276,24 @@ class session(Thread):
         headers = self.mergeHeaders(headers)
         self.target = target
         self.port = port
-        cookie = None
         # response = conn.request("POST", self.httpPath, params, headers)
         response = self.conn.urlopen('POST', self.httpPath, headers=headers, body="")
         if response.status == 200:
             status = response.getheader("x-status")
             if status == "OK":
-                cookie = response.getheader("set-cookie")
-                log.info("[%s:%d] HTTP [200]: cookie [%s]" % (self.target, self.port, cookie))
+                self.updateCookies(response.getheaders().getlist("set-cookie"))
+                log.info("[%s:%d] HTTP [200]: cookie [%s]" % (self.target, self.port, self.getcookies()))
+                return True
             else:
                 if response.getheader("X-ERROR") is not None:
                     log.error(response.getheader("X-ERROR"))
         else:
             log.error("[%s:%d] HTTP [%d]: [%s]" % (self.target, self.port, response.status, response.getheader("X-ERROR")))
             log.error("[%s:%d] RemoteError: %s" % (self.target, self.port, response.data))
-        return cookie
+        return False
 
     def closeRemoteSession(self):
-        headers = {"X-CMD": "DISCONNECT", "Cookie": self.cookie}
+        headers = {"X-CMD": "DISCONNECT", "Cookie": self.getcookies()}
         headers = self.mergeHeaders(headers)
         params = ""
         response = self.conn.request("POST", self.httpPath, params, headers)
@@ -298,7 +305,7 @@ class session(Thread):
             try:
                 if not self.pSocket:
                     break
-                headers = {"X-CMD": "READ", "Cookie": self.cookie, "Connection": "Keep-Alive"}
+                headers = {"X-CMD": "READ", "Cookie": self.getcookies(), "Connection": "Keep-Alive"}
                 headers = self.mergeHeaders(headers)
                 response = self.conn.urlopen('POST', self.httpPath, headers=headers, body="")
                 data = None
@@ -306,7 +313,7 @@ class session(Thread):
                     status = response.getheader("x-status")
                     if status == "OK":
                         if response.getheader("set-cookie") is not None:
-                            cookie = response.getheader("set-cookie")
+                            self.updateCookies(response.getheaders().getlist("set-cookie"))
                         data = response.data
                         # Yes I know this is horrible, but its a quick fix to issues with tomcat 5.x bugs that have been reported, will find a propper fix laters
                         try:
@@ -348,14 +355,14 @@ class session(Thread):
                 data = self.pSocket.recv(READBUFSIZE)
                 if not data:
                     break
-                headers = {"X-CMD": "FORWARD", "Cookie": self.cookie, "Content-Type": "application/octet-stream", "Connection": "Keep-Alive"}
+                headers = {"X-CMD": "FORWARD", "Cookie": self.getcookies(), "Content-Type": "application/octet-stream", "Connection": "Keep-Alive"}
                 headers = self.mergeHeaders(headers)
                 response = self.conn.urlopen('POST', self.httpPath, headers=headers, body=data)
                 if response.status == 200:
                     status = response.getheader("x-status")
                     if status == "OK":
                         if response.getheader("set-cookie") is not None:
-                            self.cookie = response.getheader("set-cookie")
+                            self.updateCookies(response.getheaders().getlist("set-cookie"))
                     else:
                         log.error("[%s:%d] HTTP [%d]: Status: [%s]: Message [%s] Shutting down" % (self.target, self.port, response.status, status, response.getheader("x-error")))
                         break
