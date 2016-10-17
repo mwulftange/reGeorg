@@ -116,7 +116,7 @@ class RemoteConnectionFailed(Exception):
 
 
 class session(Thread):
-    def __init__(self, pSocket, connectString):
+    def __init__(self, pSocket, connectString, custom_headers={}):
         Thread.__init__(self)
         self.pSocket = pSocket
         self.conn = None
@@ -133,11 +133,19 @@ class session(Thread):
         self.httpHost = o.netloc.split(":")[0]
         self.httpPath = o.path
         self.cookie = None
+        self.headers = custom_headers
         if o.scheme == "http":
             self.httpScheme = urllib3.HTTPConnectionPool
         else:
             self.httpScheme = urllib3.HTTPSConnectionPool
         self.conn = self.httpScheme(host=self.httpHost, port=self.httpPort, cert_reqs='CERT_NONE')
+
+    def mergeHeaders(self, headers):
+        if "Cookie" in self.headers and "Cookie" in headers:
+            headers["Cookie"] = "; ".join([headers["Cookie"], self.headers["Cookie"]])
+        headers_new = self.headers.copy()
+        headers_new.update(headers)
+        return headers_new
 
     def parseSocks5(self, sock):
         log.debug("SocksVersion5 detected")
@@ -246,6 +254,7 @@ class session(Thread):
                 log.info("Remote DNS Query Result: [%s] <---> [%s] (cached, TTL=%d)" % (host, entry['address'], ttl))
                 return entry['address']
         headers = {"X-CMD": "DNS", "X-TARGET": host}
+        headers = self.mergeHeaders(headers)
         response = self.conn.urlopen('POST', self.httpPath, headers=headers, body="")
         if response.status == 200 and re.match(r'^\d+(?:\.\d+){3}', response.data):
             dns_cache[host] = entry = { 'address': response.data, 'time': time() }
@@ -257,6 +266,7 @@ class session(Thread):
 
     def setupRemoteSession(self, target, port):
         headers = {"X-CMD": "CONNECT", "X-TARGET": target, "X-PORT": port}
+        headers = self.mergeHeaders(headers)
         self.target = target
         self.port = port
         cookie = None
@@ -277,6 +287,7 @@ class session(Thread):
 
     def closeRemoteSession(self):
         headers = {"X-CMD": "DISCONNECT", "Cookie": self.cookie}
+        headers = self.mergeHeaders(headers)
         params = ""
         response = self.conn.request("POST", self.httpPath, params, headers)
         if response.status == 200:
@@ -288,6 +299,7 @@ class session(Thread):
                 if not self.pSocket:
                     break
                 headers = {"X-CMD": "READ", "Cookie": self.cookie, "Connection": "Keep-Alive"}
+                headers = self.mergeHeaders(headers)
                 response = self.conn.urlopen('POST', self.httpPath, headers=headers, body="")
                 data = None
                 if response.status == 200:
@@ -337,6 +349,7 @@ class session(Thread):
                 if not data:
                     break
                 headers = {"X-CMD": "FORWARD", "Cookie": self.cookie, "Content-Type": "application/octet-stream", "Connection": "Keep-Alive"}
+                headers = self.mergeHeaders(headers)
                 response = self.conn.urlopen('POST', self.httpPath, headers=headers, body=data)
                 if response.status == 200:
                     status = response.getheader("x-status")
@@ -390,7 +403,7 @@ class session(Thread):
             self.pSocket.close()
 
 
-def askGeorg(connectString):
+def askGeorg(connectString, custom_headers={}):
     connectString = connectString
     o = urlparse(connectString)
     try:
@@ -409,7 +422,7 @@ def askGeorg(connectString):
         httpScheme = urllib3.HTTPSConnectionPool
 
     conn = httpScheme(host=httpHost, port=httpPort, cert_reqs='CERT_NONE')
-    response = conn.request("GET", httpPath)
+    response = conn.request("GET", httpPath, headers=custom_headers)
     if response.status == 200:
         if BASICCHECKSTRING == response.data.strip():
             log.info(BASICCHECKSTRING)
@@ -440,6 +453,7 @@ if __name__ == '__main__':
     parser.add_argument("-r", "--read-buff", metavar="", help="Local read buffer, max data to be sent per POST", type=int, default="1024")
     parser.add_argument("-u", "--url", metavar="", required=True, help="The url containing the tunnel script")
     parser.add_argument("-v", "--verbose", metavar="", help="Verbose output[INFO|DEBUG]", default="INFO")
+    parser.add_argument("-H", "--custom-header", metavar="", help="Custom HTTP header", nargs='*')
     args = parser.parse_args()
     if (args.verbose in LEVEL):
         log.setLevel(LEVEL[args.verbose])
@@ -447,7 +461,11 @@ if __name__ == '__main__':
 
     log.info("Starting socks server [%s:%d], tunnel at [%s]" % (args.listen_on, args.listen_port, args.url))
     log.info("Checking if Georg is ready")
-    if not askGeorg(args.url):
+    if args.custom_header is not None:
+        custom_headers = dict(h.split(":", 1) for h in args.custom_header)
+    else:
+        custom_headers ={}
+    if not askGeorg(args.url, custom_headers):
         log.info("Georg is not ready, please check url")
         exit()
     READBUFSIZE = args.read_buff
@@ -460,7 +478,7 @@ if __name__ == '__main__':
             sock, addr_info = servSock.accept()
             sock.settimeout(SOCKTIMEOUT)
             log.debug("Incomming connection")
-            session(sock, args.url).start()
+            session(sock, args.url, custom_headers).start()
         except KeyboardInterrupt, ex:
             break
         except Exception, e:
