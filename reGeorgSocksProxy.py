@@ -137,7 +137,7 @@ class session(Thread):
             self.httpScheme = urllib3.HTTPConnectionPool
         else:
             self.httpScheme = urllib3.HTTPSConnectionPool
-        self.conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
+        self.conn = self.httpScheme(host=self.httpHost, port=self.httpPort, cert_reqs='CERT_NONE')
 
     def parseSocks5(self, sock):
         log.debug("SocksVersion5 detected")
@@ -283,7 +283,6 @@ class session(Thread):
             log.info("[%s:%d] Connection Terminated" % (self.target, self.port))
 
     def reader(self):
-        conn = self.httpScheme(host=self.httpHost, port=self.httpPort)
         while True:
             try:
                 if not self.pSocket:
@@ -409,7 +408,7 @@ def askGeorg(connectString):
     else:
         httpScheme = urllib3.HTTPSConnectionPool
 
-    conn = httpScheme(host=httpHost, port=httpPort)
+    conn = httpScheme(host=httpHost, port=httpPort, cert_reqs='CERT_NONE')
     response = conn.request("GET", httpPath)
     if response.status == 200:
         if BASICCHECKSTRING == response.data.strip():
