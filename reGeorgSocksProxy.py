@@ -134,11 +134,14 @@ class session(Thread):
         self.httpPath = o.path
         self.cookies = {}
         self.headers = custom_headers
+        httpScheme_kwargs = {}
         if o.scheme == "http":
             self.httpScheme = urllib3.HTTPConnectionPool
         else:
             self.httpScheme = urllib3.HTTPSConnectionPool
-        self.conn = self.httpScheme(host=self.httpHost, port=self.httpPort, cert_reqs='CERT_NONE')
+            httpScheme_kwargs['cert_reqs'] = 'CERT_NONE'
+
+        self.conn = self.httpScheme(host=self.httpHost, port=self.httpPort, **httpScheme_kwargs)
 
     def mergeHeaders(self, headers):
         if "Cookie" in self.headers and "Cookie" in headers:
@@ -423,12 +426,14 @@ def askGeorg(connectString, custom_headers={}):
     httpScheme = o.scheme
     httpHost = o.netloc.split(":")[0]
     httpPath = o.path
+    httpScheme_kwargs = {}
     if o.scheme == "http":
         httpScheme = urllib3.HTTPConnectionPool
     else:
         httpScheme = urllib3.HTTPSConnectionPool
+        httpScheme_kwargs['cert_reqs'] = 'CERT_NONE'
 
-    conn = httpScheme(host=httpHost, port=httpPort, cert_reqs='CERT_NONE')
+    conn = httpScheme(host=httpHost, port=httpPort, **httpScheme_kwargs)
     response = conn.request("GET", httpPath, headers=custom_headers)
     if response.status == 200:
         if BASICCHECKSTRING == response.data.strip():
